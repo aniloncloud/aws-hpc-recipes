@@ -28,6 +28,7 @@ Description: |
 # 6. Added parameters to connect to an existing Active Directory instead of creating a new one
 # 7. Fixed parameter naming inconsistency in RESSsoKeycloak (renamed PublicSubnet to DeploymentSubnet)
 # 8. Updated all CloudFormation stack references to use local template files instead of S3 URLs
+# 9. Removed DnsIpAddresses parameter from RES stack since it doesn't exist in target template
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -123,7 +124,7 @@ Parameters:
     Default: ""
 
   ExistingADDNSIPs:
-    Description: "(Required if UseExistingActiveDirectory is True) A comma-separated list of DNS IP addresses for your existing Active Directory. Example: 10.0.0.10,10.0.1.10"
+    Description: "(Required if UseExistingActiveDirectory is True) A comma-separated list of DNS IP addresses for your existing Active Directory. Example: 10.0.0.10,10.0.1.10. Note: These DNS IPs will be used for network connectivity but are not directly passed to the RES template."
     Type: String
     Default: ""
 
@@ -350,10 +351,6 @@ Resources:
           - UseExistingAD
           - !Ref ExistingADServiceAccountUserDN
           - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ServiceAccountUserDN ], ""]
-        DnsIpAddresses: !If
-          - UseExistingAD
-          - !Ref ExistingADDNSIPs
-          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.DnsIpAddresses ], ""]
         HttpProxy: ""
         HttpsProxy: ""
         NoProxy: ""
