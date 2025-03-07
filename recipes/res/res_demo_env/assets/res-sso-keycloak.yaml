@@ -10,7 +10,7 @@ Metadata:
           - Keypair
           - ServiceAccountCredentialsSecretArn
           - VpcId
-          - PublicSubnet
+          - DeploymentSubnet
           - ServiceAccountUserDN
           - UsersDN
           - LDAPConnectionURI
@@ -38,10 +38,10 @@ Parameters:
     AllowedPattern: vpc-[0-9a-f]{17}
     ConstraintDescription: VpcId must begin with 'vpc-', only contain letters (a-f) or numbers(0-9) and must be 21 characters in length
   
-  PublicSubnet:
+  DeploymentSubnet:
     Type: AWS::EC2::Subnet::Id
     AllowedPattern: subnet-.+
-    Description: Select a public subnet from the already selected VPC
+    Description: Select a subnet from the already selected VPC for Keycloak deployment (can be private or public)
   
   ServiceAccountUserDN:
     Type: String
@@ -67,7 +67,7 @@ Resources:
         Keypair: !Ref Keypair
         ServiceAccountCredentialsSecretArn: !Ref ServiceAccountCredentialsSecretArn
         VpcId: !Ref VpcId
-        PublicSubnet: !Ref PublicSubnet
+        DeploymentSubnet: !Ref DeploymentSubnet
         ServiceAccountUserDN: !Ref ServiceAccountUserDN
         UsersDN: !Ref UsersDN
         LDAPConnectionURI: !Ref LDAPConnectionURI
