@@ -1,4 +1,33 @@
-Description: Research and Engineering Studio on AWS demo environment
+Description: |
+  Research and Engineering Studio on AWS demo environment
+  
+  This template deploys a complete RES environment with the following options:
+  - Can create a new AWS Managed Microsoft AD for testing/demo purposes
+  - Can connect to an existing Active Directory instead of creating a new one
+  - Deploys in a private network configuration with customizable CIDR ranges
+  - Includes SSO integration via Keycloak when using the built-in AD option
+  
+  When using an existing Active Directory, you must provide connection details including:
+  - Domain information (FQDN, NetBIOS name, DNS IPs)
+  - OU paths for users, groups, and computers
+  - Service account credentials stored in AWS Secrets Manager
+  
+  Network Architecture:
+  - Creates a VPC with both public and private subnets across multiple Availability Zones
+  - RES components are deployed in private subnets for enhanced security
+  - NAT Gateways provide outbound internet access from private subnets when needed
+  - The load balancer is configured as internal, accessible only from within the VPC
+  - For network connectivity to your existing AD, ensure proper routing between the VPC and your AD network
+
+# Changes made to this template:
+# 1. Added CIDR parameters to allow customization of VPC and subnet CIDR ranges
+# 2. Modified the RESExternal stack to pass these CIDR parameters 
+# 3. Changed LoadBalancerSubnets to use private subnets instead of public subnets
+# 4. Changed IsLoadBalancerInternetFacing to "false" to make the load balancer internal
+# 5. Changed RESSsoKeycloak to deploy in private subnet instead of public
+# 6. Added parameters to connect to an existing Active Directory instead of creating a new one
+# 7. Fixed parameter naming inconsistency in RESSsoKeycloak (renamed PublicSubnet to DeploymentSubnet)
+# 8. Updated all CloudFormation stack references to use local template files instead of S3 URLs
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -10,11 +39,35 @@ Metadata:
           - AdministratorEmail
           - CreateActiveDirectory
       - Label:
+          default: Network Configuration
+        Parameters:
+          - VpcCidr
+          - PublicSubnet1Cidr
+          - PublicSubnet2Cidr
+          - PrivateSubnet1Cidr
+          - PrivateSubnet2Cidr
+      - Label:
           default: Access Management
         Parameters:
           - Keypair
           - ClientIpCidr
           - InboundPrefixList
+      - Label:
+          default: Existing Active Directory Configuration
+        Parameters:
+          - UseExistingActiveDirectory
+          - ExistingADName
+          - ExistingADDNSIPs
+          - ExistingADShortName
+          - ExistingADServiceAccountSecretArn
+          - ExistingADServiceAccountUserDN
+          - ExistingADLDAPBase
+          - ExistingADUsersOU
+          - ExistingADGroupsOU
+          - ExistingADComputersOU
+          - ExistingADSudoersGroupName
+          - ExistingADDomainTLSCertificateSecretArn
+          - EnableLdapsForExistingAD
 
 Parameters:
 
@@ -24,18 +77,19 @@ Parameters:
     Default: ""
 
   EnvironmentName:
-    Description: Provide name of the RES Environment. Must be unique for your account and AWS Region.
+    Description: "Provide name of the RES Environment. Must be unique for your account and AWS Region. Example: res-demo"
     Type: String
     Default: res-demo
     AllowedPattern: ^res-[a-z\-\_0-9]{0,7}$
     ConstraintDescription: EnvironmentName must start with "res-" without capital letters and should be less than or equal to 11 characters.
 
   AdministratorEmail:
+    Description: "Email address for the RES administrator. Example: admin@example.com"
     Type: String
     AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
 
   ClientIpCidr:
-    Description: Default IP(s) allowed to directly access the Web UI, SSH into the bastion host, and access the Windows AD admin host. We recommend that you restrict it with your own IP/subnet (x.x.x.x/32 for your own ip or x.x.x.x/24 for range. Replace x.x.x.x with your own PUBLIC IP. You can get your public IP using tools such as https://ifconfig.co/)
+    Description: "Default IP(s) allowed to directly access the Web UI, SSH into the bastion host, and access the Windows AD admin host. Example for single IP: 192.168.1.1/32, Example for range: 192.168.1.0/24"
     Type: String
     AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
     ConstraintDescription: Value must be a valid IP or network range of the form x.x.x.x/x.
@@ -55,12 +109,122 @@ Parameters:
          - "True"
          - "False"
 
+  UseExistingActiveDirectory:
+    Description: "Use an existing Active Directory for RES to connect to. If set to True, you must provide all of the Existing AD parameters and ensure network connectivity between the VPC created by this stack and your AD network (via VPC peering, Transit Gateway, Direct Connect, etc.)"
+    Type: String
+    Default: "False"
+    AllowedValues:
+         - "True"
+         - "False"
+
+  ExistingADName:
+    Description: "(Required if UseExistingActiveDirectory is True) The fully qualified domain name (FQDN) of your existing Active Directory. Example: corp.example.com"
+    Type: String
+    Default: ""
+
+  ExistingADDNSIPs:
+    Description: "(Required if UseExistingActiveDirectory is True) A comma-separated list of DNS IP addresses for your existing Active Directory. Example: 10.0.0.10,10.0.1.10"
+    Type: String
+    Default: ""
+
+  ExistingADShortName:
+    Description: "(Required if UseExistingActiveDirectory is True) The NetBIOS name of your existing Active Directory domain. Example: CORP"
+    Type: String
+    Default: ""
+
+  ExistingADServiceAccountSecretArn:
+    Description: "(Required if UseExistingActiveDirectory is True) The ARN of the AWS Secrets Manager secret containing the service account credentials. The secret must be in JSON format with 'username' and 'password' keys: {\"username\": \"serviceaccount\", \"password\": \"yourpassword\"}. Example: arn:aws:secretsmanager:region:account:secret:secret-name-123456"
+    Type: String
+    Default: ""
+
+  ExistingADServiceAccountUserDN:
+    Description: "(Required if UseExistingActiveDirectory is True) The Distinguished Name (DN) of the service account. Example: CN=ServiceAccount,OU=ServiceAccounts,DC=corp,DC=example,DC=com"
+    Type: String
+    Default: ""
+
+  ExistingADLDAPBase:
+    Description: "(Required if UseExistingActiveDirectory is True) The LDAP Base DN for your Active Directory. Example: DC=corp,DC=example,DC=com"
+    Type: String
+    Default: ""
+
+  ExistingADUsersOU:
+    Description: "(Required if UseExistingActiveDirectory is True) The OU where user accounts will be located. Example: OU=Users,OU=RES,DC=corp,DC=example,DC=com"
+    Type: String
+    Default: ""
+
+  ExistingADGroupsOU:
+    Description: "(Required if UseExistingActiveDirectory is True) The OU where group accounts will be located. Example: OU=Groups,OU=RES,DC=corp,DC=example,DC=com"
+    Type: String
+    Default: ""
+
+  ExistingADComputersOU:
+    Description: "(Required if UseExistingActiveDirectory is True) The OU where computer accounts will be located. Example: OU=Computers,OU=RES,DC=corp,DC=example,DC=com"
+    Type: String
+    Default: ""
+
+  ExistingADSudoersGroupName:
+    Description: "(Required if UseExistingActiveDirectory is True) The name of the Active Directory group for administrator privileges. Example: RESAdministrators"
+    Type: String
+    Default: "RESAdministrators"
+
+  ExistingADDomainTLSCertificateSecretArn:
+    Description: "(Required if EnableLdapsForExistingAD is True) ARN of the Secrets Manager secret containing the AD TLS certificate in PEM format. The certificate must be the CA certificate that signed the AD server certificate. Example: arn:aws:secretsmanager:region:account:secret:certificate-123456"
+    Type: String
+    Default: ""
+
+  EnableLdapsForExistingAD:
+    Description: "(Optional) Whether to use LDAPS for secure communications with the existing Active Directory. If True, you must provide the ExistingADDomainTLSCertificateSecretArn parameter. Example: True"
+    Type: String
+    Default: "False"
+    AllowedValues:
+         - "True"
+         - "False"
+
+  VpcCidr:
+    Description: "CIDR block for the VPC. Example: 10.0.0.0/16"
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+
+  PublicSubnet1Cidr:
+    Description: CIDR block for the public subnet in Availability Zone 1
+    Type: String
+    Default: 10.0.0.0/24
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+
+  PublicSubnet2Cidr:
+    Description: CIDR block for the public subnet in Availability Zone 2
+    Type: String
+    Default: 10.0.1.0/24
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+
+  PrivateSubnet1Cidr:
+    Description: CIDR block for the private subnet in Availability Zone 1
+    Type: String
+    Default: 10.0.2.0/24
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+
+  PrivateSubnet2Cidr:
+    Description: CIDR block for the private subnet in Availability Zone 2
+    Type: String
+    Default: 10.0.3.0/24
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be in the form x.x.x.x/16-28
+
 Conditions:
   UseEnvironmentName: !Not [!Equals [!Ref EnvironmentName, ""]]
   CreateAD: !Equals [!Ref CreateActiveDirectory, "True"]
+  UseExistingAD: !Equals [!Ref UseExistingActiveDirectory, "True"]
+  EnableLdaps: !Equals [!Ref EnableLdapsForExistingAD, "True"]
+  UseCreatedOrExistingAD: !Or [!Condition CreateAD, !Condition UseExistingAD]
 
 Resources:
 
+  # Active Directory credential secrets (used only when creating a new AD)
   AdminPassword:
     Condition: CreateAD
     Type: AWS::SecretsManager::Secret
@@ -93,6 +257,7 @@ Resources:
         - Key: res:EnvironmentName
           Value: !Ref EnvironmentName
 
+  # External infrastructure stack - Creates VPC, subnets, and Active Directory if requested
   RESExternal:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -106,8 +271,16 @@ Resources:
         ClientPrefixList: !Ref InboundPrefixList
         RetainStorageResources: "False"  
         CreateActiveDirectory: !Ref CreateActiveDirectory
-      TemplateURL: https://aws-hpc-recipes.s3.us-east-1.amazonaws.com/main/recipes/res/res_demo_env/assets/bi.yaml
+        VpcCidr: !Ref VpcCidr
+        PublicSubnet1Cidr: !Ref PublicSubnet1Cidr
+        PublicSubnet2Cidr: !Ref PublicSubnet2Cidr
+        PrivateSubnet1Cidr: !Ref PrivateSubnet1Cidr
+        PrivateSubnet2Cidr: !Ref PrivateSubnet2Cidr
+      TemplateURL: ./bi.yaml
 
+  # Main RES stack - Creates the Research and Engineering Studio application
+  # Parameters are conditionally set based on whether we're using a new or existing AD
+  # The RES stack is configured to use private subnets for all components, making the deployment more secure
   RES:
     Type: AWS::CloudFormation::Stack
     DependsOn: InvokeDeleteSharedStorageSecurityGroup
@@ -123,32 +296,72 @@ Resources:
         CustomDomainNameforVDI: ""
         PrivateKeySecretARNforVDI: ""
         CertificateSecretARNforVDI: ""
-        DomainTLSCertificateSecretArn: ""
+        DomainTLSCertificateSecretArn: !If [EnableLdaps, !Ref ExistingADDomainTLSCertificateSecretArn, ""]
         VpcId: !GetAtt [ RESExternal, Outputs.VpcId ]
-        LoadBalancerSubnets: !GetAtt [ RESExternal, Outputs.PublicSubnets ]
+        # Using private subnets for all components to enhance security
+        LoadBalancerSubnets: !GetAtt [ RESExternal, Outputs.PrivateSubnets ]
         InfrastructureHostSubnets: !GetAtt [ RESExternal, Outputs.PrivateSubnets ]
         VdiSubnets: !GetAtt [ RESExternal, Outputs.PrivateSubnets ]
-        IsLoadBalancerInternetFacing: "true"
-        ActiveDirectoryName: !If [CreateAD, !GetAtt [ RESExternal, Outputs.ActiveDirectoryName ], ""]
-        ADShortName: !If [CreateAD, !GetAtt [ RESExternal, Outputs.ADShortName ], ""]
-        LDAPBase: !If [CreateAD, !GetAtt [ RESExternal, Outputs.LDAPBase ], ""]
-        LDAPConnectionURI: !If [CreateAD, !GetAtt [ RESExternal, Outputs.LDAPConnectionURI ], ""]
-        SudoersGroupName: !If [CreateAD, RESAdministrators, ""]
-        ServiceAccountCredentialsSecretArn: !If [CreateAD, !GetAtt [ RESExternal, Outputs.ServiceAccountCredentialsSecretArn ], ""]
-        UsersOU: !If [CreateAD, !GetAtt [ RESExternal, Outputs.UsersOU ], ""]
-        GroupsOU: !If [CreateAD, !GetAtt [ RESExternal, Outputs.GroupsOU ], ""]
-        ComputersOU: !If [CreateAD, !GetAtt [ RESExternal, Outputs.ComputersOU ], ""]
+        # Setting the load balancer to internal mode (not internet-facing)
+        IsLoadBalancerInternetFacing: "false"
+        # Active Directory parameters - conditionally set based on whether using new or existing AD
+        ActiveDirectoryName: !If 
+          - UseExistingAD
+          - !Ref ExistingADName
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ActiveDirectoryName ], ""]
+        ADShortName: !If 
+          - UseExistingAD
+          - !Ref ExistingADShortName
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ADShortName ], ""]
+        LDAPBase: !If 
+          - UseExistingAD
+          - !Ref ExistingADLDAPBase
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.LDAPBase ], ""]
+        LDAPConnectionURI: !If 
+          - UseExistingAD
+          - !Sub "ldap://${ExistingADName}"
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.LDAPConnectionURI ], ""]
+        SudoersGroupName: !If 
+          - UseExistingAD
+          - !Ref ExistingADSudoersGroupName
+          - !If [CreateAD, RESAdministrators, ""]
+        ServiceAccountCredentialsSecretArn: !If 
+          - UseExistingAD
+          - !Ref ExistingADServiceAccountSecretArn
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ServiceAccountCredentialsSecretArn ], ""]
+        UsersOU: !If 
+          - UseExistingAD
+          - !Ref ExistingADUsersOU
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.UsersOU ], ""]
+        GroupsOU: !If 
+          - UseExistingAD
+          - !Ref ExistingADGroupsOU
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.GroupsOU ], ""]
+        ComputersOU: !If 
+          - UseExistingAD
+          - !Ref ExistingADComputersOU
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ComputersOU ], ""]
         SharedHomeFileSystemId: !GetAtt [ RESExternal, Outputs.SharedHomeFilesystemId ]
         InfrastructureHostAMI: ""
         EnableLdapIDMapping: "True"
         IAMPermissionBoundary: ""
         DisableADJoin: "False"
-        ServiceAccountUserDN: !If [CreateAD, !GetAtt [ RESExternal, Outputs.ServiceAccountUserDN ], ""]
+        ServiceAccountUserDN: !If 
+          - UseExistingAD
+          - !Ref ExistingADServiceAccountUserDN
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.ServiceAccountUserDN ], ""]
+        DnsIpAddresses: !If
+          - UseExistingAD
+          - !Ref ExistingADDNSIPs
+          - !If [CreateAD, !GetAtt [ RESExternal, Outputs.DnsIpAddresses ], ""]
         HttpProxy: ""
         HttpsProxy: ""
         NoProxy: ""
       TemplateURL: https://research-engineering-studio-us-east-1.s3.amazonaws.com/releases/latest/ResearchAndEngineeringStudio.template.json
 
+  # SSO Keycloak stack - Creates Keycloak for SSO (only when using a new AD)
+  # This service is deployed in a private subnet for enhanced security
+  # Access to Keycloak is only available through the internal load balancer
   RESSsoKeycloak:
     Condition: CreateAD
     Type: AWS::CloudFormation::Stack
@@ -159,12 +372,14 @@ Resources:
         Keypair: !Ref Keypair
         ServiceAccountCredentialsSecretArn: !GetAtt [ RESExternal, Outputs.ServiceAccountCredentialsSecretArn ]
         VpcId: !GetAtt [ RESExternal, Outputs.VpcId ]
-        PublicSubnet: !Select [0, !Split [",", !GetAtt RESExternal.Outputs.PublicSubnets]]
+        # Using a private subnet instead of public for better security
+        DeploymentSubnet: !Select [0, !Split [",", !GetAtt RESExternal.Outputs.PrivateSubnets]]
         ServiceAccountUserDN: !GetAtt [ RESExternal, Outputs.ServiceAccountUserDN ]
         UsersDN: !GetAtt [ RESExternal, Outputs.LDAPBase ]
         LDAPConnectionURI: !GetAtt [ RESExternal, Outputs.LDAPConnectionURI ]
-      TemplateURL: https://aws-hpc-recipes.s3.us-east-1.amazonaws.com/main/recipes/res/res_demo_env/assets/res-sso-keycloak.yaml
+      TemplateURL: ./res-sso-keycloak.yaml
 
+  # Role for the Lambda function that deletes the shared storage security group
   InvokeDeleteSharedStorageSecurityGroupRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -192,6 +407,7 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                 Resource: '*'
 
+  # Lambda function to delete the shared storage security group when the stack is deleted
   InvokeDeleteSharedSecurityGroupHandlerFunction:
       Type: 'AWS::Lambda::Function'
       DependsOn: 
@@ -248,11 +464,13 @@ Resources:
           Variables:
             ENVIRONMENT_NAME: !Ref EnvironmentName
 
+  # Custom resource that invokes the Lambda function to delete the shared storage security group
   InvokeDeleteSharedStorageSecurityGroup:
     Type: Custom::DeleteSharedStorageSecurityGroup
     Properties:
       ServiceToken: !GetAtt InvokeDeleteSharedSecurityGroupHandlerFunction.Arn
 
+  # Role for the Lambda function that performs post-deployment configuration
   RESPostDeploymentConfiguationFunctionRole:
     Type: 'AWS::IAM::Role'
     DependsOn: RES
@@ -291,6 +509,7 @@ Resources:
                     dynamodb:LeadingKeys:
                       - shared-storage.*
 
+  # Lambda function to perform post-deployment configuration
   RESPostDeploymentConfiguationFunction:
       Type: 'AWS::Lambda::Function'
       DependsOn:
@@ -367,6 +586,7 @@ Resources:
           Variables:
             ENVIRONMENT_NAME: !Ref EnvironmentName
 
+  # Custom resource that invokes the post-deployment configuration Lambda function
   RESPostDeploymentConfiguation:
     Type: Custom::RESPostDeploymentConfiguation
     Properties:
@@ -385,3 +605,6 @@ Outputs:
     Description: RES application Url
     Value: !GetAtt [ RESSsoKeycloak, Outputs.ApplicationUrl ]
     Condition: CreateAD
+  ActiveDirectoryType:
+    Description: Type of Active Directory being used
+    Value: !If [CreateAD, "AWS Managed Microsoft AD (Created by this stack)", !If [UseExistingAD, "Existing Active Directory", "None"]]
