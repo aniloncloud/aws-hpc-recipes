@@ -1,23 +1,23 @@
 Description: |
   Research and Engineering Studio on AWS demo environment
   
-  This template deploys a complete RES environment with the following options:
-  - Can create a new AWS Managed Microsoft AD for testing/demo purposes
-  - Can connect to an existing Active Directory instead of creating a new one
-  - Deploys in a private network configuration with customizable CIDR ranges
-  - Includes SSO integration via Keycloak when using the built-in AD option
-  
-  When using an existing Active Directory, you must provide connection details including:
-  - Domain information (FQDN, NetBIOS name, DNS IPs)
-  - OU paths for users, groups, and computers
-  - Service account credentials stored in AWS Secrets Manager
-  
-  Network Architecture:
-  - Creates a VPC with both public and private subnets across multiple Availability Zones
-  - RES components are deployed in private subnets for enhanced security
-  - NAT Gateways provide outbound internet access from private subnets when needed
-  - The load balancer is configured as internal, accessible only from within the VPC
-  - For network connectivity to your existing AD, ensure proper routing between the VPC and your AD network
+# This template deploys a complete RES environment with the following options:
+# - Can create a new AWS Managed Microsoft AD for testing/demo purposes
+# - Can connect to an existing Active Directory instead of creating a new one
+# - Deploys in a private network configuration with customizable CIDR ranges
+# - Includes SSO integration via Keycloak when using the built-in AD option
+
+# When using an existing Active Directory, you must provide connection details including:
+# - Domain information (FQDN, NetBIOS name, DNS IPs)
+# - OU paths for users, groups, and computers
+# - Service account credentials stored in AWS Secrets Manager
+
+# Network Architecture:
+# - Creates a VPC with both public and private subnets across multiple Availability Zones
+# - RES components are deployed in private subnets for enhanced security
+# - NAT Gateways provide outbound internet access from private subnets when needed
+# - The load balancer is configured as internal, accessible only from within the VPC
+# - For network connectivity to your existing AD, ensure proper routing between the VPC and your AD network
 
 # Changes made to this template:
 # 1. Added CIDR parameters to allow customization of VPC and subnet CIDR ranges
